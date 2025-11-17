@@ -50,7 +50,9 @@ def get_valid_moves(board, row, column):
             if board[r][c] is not None:
                 break
             if (r, c) == THRONE:
-                break
+                r += dr
+                c += dc
+                continue
             if (r, c) in CORNERS and not piece.is_king:
                 break
             valid_moves.append((r, c))
@@ -102,16 +104,26 @@ def king_captured(r, c, state):
     if not king or not king.is_king:
         return False
     directions = [(-1,0),(1,0),(0,-1),(0,1)]
+
     def is_attacker(pos):
         nr, nc = pos
         if 0 <= nr < ROWS and 0 <= nc < COLUMNS:
             neighbor = state["board"][nr][nc]
             return neighbor is not None and neighbor.team == 'attacker'
         return False
+
     def is_special_square(pos):
         return pos in SPECIAL_SQUARES
-    if (r, c) == THRONE:
-        return all(is_attacker((r+dr, c+dc)) for dr, dc in directions)
+
+    # Throne or adjacent squares: king must be surrounded by 4 hostile squares
+    if (r, c) == THRONE or any((r+dr, c+dc) == THRONE for dr, dc in directions):
+        return all(
+            is_attacker((r+dr, c+dc)) or is_special_square((r+dr, c+dc))
+            for dr, dc in directions
+            if 0 <= r+dr < ROWS and 0 <= c+dc < COLUMNS
+        )
+
+    # Normal capture logic
     for dr, dc in directions:
         nr, nc = r+dr, c+dc
         opp_r, opp_c = r-dr, c-dc
