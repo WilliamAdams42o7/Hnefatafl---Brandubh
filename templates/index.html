@@ -1,206 +1,288 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8"/>
     <title>Hnefatafl</title>
     <style>
-        table { border-collapse: collapse; margin: 20px auto; }
+        html,body { height:100%; margin:0; font-family: sans-serif; }
+
+        /* --- NEW PAGE BACKGROUND STATES --- */
+        body.attacker-turn { background-color: #ffcccc; transition: background-color 0.3s ease; }
+        body.defender-turn { background-color: #cce0ff; transition: background-color 0.3s ease; }
+        body.attacker-win  { background-color: #ad2f2f !important; }
+        body.defender-win  { background-color: #2c6bab !important; }
+
+        .container { max-width:520px; margin:18px auto; text-align:center; }
+        table { border-collapse: collapse; margin: 10px auto; }
         td {
             width: 60px;
             height: 60px;
             border: 1px solid #333;
-            text-align: center;
-            vertical-align: middle;
+            padding:0;
+            position: relative;
+            box-sizing: border-box;
         }
         td.light { background-color: #deb887; } /* L_BROWN */
-        td.dark { background-color: #85542a; }   /* D_BROWN */
-        #status { text-align: center; font-size: 20px; margin-top: 20px; }
-        #mode-buttons { text-align: center; margin: 20px; }
-        button { padding: 10px 20px; margin: 5px; }
+        td.dark  { background-color: #85542a; } /* D_BROWN */
+        td.selected { outline: 3px solid yellow; outline-offset: -3px; }
+        #status { text-align: center; font-size: 16px; margin-top: 8px; min-height:22px; }
+        #mode-buttons { margin: 10px 0; }
+        button { padding: 8px 12px; margin: 4px; }
+            #board {
+        border: 4px solid black;
+        display: inline-block;
+        }
+        svg.square-svg { display:block; margin:auto; }
     </style>
 </head>
-<body>
-    <div id="mode-buttons">
-        <button onclick="startGame('PvP')">Player vs Player</button>
-        <button onclick="startGame('PvAI')">Player vs AI</button>
-        <button onclick="startGame('AIvP')">AI vs Player</button>
-        <button onclick="startGame('AIvAI')">AI vs AI</button>
+
+<body id="page">
+    <div class="container">
+        <div id="mode-buttons">
+            <button onclick="startGame('PvP')">Player vs Player</button>
+        </div>
+
+        <div id="status">Press "Player vs Player" to start</div>
+        <table id="board" aria-label="Hnefatafl board"></table>
     </div>
 
-    <div id="status"></div>
-    <table id="board"></table>
+<script>
+const SPECIAL_SQUARES = [[3,3],[0,0],[0,6],[6,0],[6,6]];
+let selected = null;
+let gameOver = false;
+let currentBoard = null;
+let currentTurn = null;
 
-    <script>
-        const SPECIAL_SQUARES = [[3,3],[0,0],[0,6],[6,0],[6,6]]; // throne + corners
-        let selected = null;
-        let gameOver = false;
+function updateBackground() {
+    const body = document.getElementById("page");
 
-        function startGame(mode) {
-            fetch('/start_game', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mode: mode })
-            })
-            .then(response => response.json())
-            .then(data => {
-                selected = null;
-                gameOver = false;
-                renderBoard(data.board);
-                document.getElementById('status').innerText = "Game started: " + mode;
-            });
-        }
+    body.classList.remove(
+        "attacker-turn",
+        "defender-turn",
+        "attacker-win",
+        "defender-win"
+    );
 
-        function renderBoard(board) {
-            const table = document.getElementById('board');
-            table.innerHTML = '';
-            board.forEach((row, r) => {
-                const tr = document.createElement('tr');
-                row.forEach((cell, c) => {
-                    const td = document.createElement('td');
-                    td.dataset.row = r;
-                    td.dataset.col = c;
-                    td.classList.add((r + c) % 2 === 0 ? 'light' : 'dark');
+    if (gameOver) {
+        if (currentTurn === "attacker") body.classList.add("attacker-win");
+        if (currentTurn === "defender") body.classList.add("defender-win");
+        return;
+    }
 
-                    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-                    svg.setAttribute("width", "50");
-                    svg.setAttribute("height", "50");
+    if (currentTurn === "attacker") body.classList.add("attacker-turn");
+    else if (currentTurn === "defender") body.classList.add("defender-turn");
+}
+/* -------------------------------------------------- */
 
-                    // Draw cross under piece for throne/corners
-                    if (SPECIAL_SQUARES.some(pos => pos[0] === r && pos[1] === c)) {
-                        const crossSize = 45;
-                        const offset = 25;
-                        const line1 = document.createElementNS("http://www.w3.org/2000/svg","line");
-                        line1.setAttribute("x1", offset - crossSize/2);
-                        line1.setAttribute("y1", offset - crossSize/2);
-                        line1.setAttribute("x2", offset + crossSize/2);
-                        line1.setAttribute("y2", offset + crossSize/2);
-                        line1.setAttribute("stroke","black");
-                        line1.setAttribute("stroke-width",2);
-                        svg.appendChild(line1);
+function startGame(mode) {
+    fetch('/start_game', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ mode })
+    }).then(res => res.json())
+      .then(data => {
+          currentBoard = data.board;
+          gameOver = false;
+          selected = null;
+          currentTurn = data.current_turn;
 
-                        const line2 = document.createElementNS("http://www.w3.org/2000/svg","line");
-                        line2.setAttribute("x1", offset + crossSize/2);
-                        line2.setAttribute("y1", offset - crossSize/2);
-                        line2.setAttribute("x2", offset - crossSize/2);
-                        line2.setAttribute("y2", offset + crossSize/2);
-                        line2.setAttribute("stroke","black");
-                        line2.setAttribute("stroke-width",2);
-                        svg.appendChild(line2);
-                    }
+          document.getElementById('status').innerText =
+              "Game started: " + (mode || 'PvP');
 
-                    // Draw piece if present
-                    if (cell) {
-                        const topY = 20;
-                        const bottomY = 28;
-                        const cx = 25;
-                        const rx = 20;
-                        const ry = 10;
-                        const fillColor = cell.is_king ? "#009999" : (cell.team === "attacker" ? "#ff6666" : "#66cccc");
-                        const sideColor = cell.is_king ? "#007777" : (cell.team === "attacker" ? "#cc0000" : "#339999");
+          renderBoard(currentBoard);
+          updateBackground();   // NEW
+      })
+      .catch(err => {
+          console.error(err);
+          alert('Could not start game (check server).');
+      });
+}
 
-                        // bottom ellipse
-                        const bottom = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
-                        bottom.setAttribute("cx", cx);
-                        bottom.setAttribute("cy", bottomY);
-                        bottom.setAttribute("rx", rx);
-                        bottom.setAttribute("ry", ry);
-                        bottom.setAttribute("fill", sideColor);
-                        bottom.setAttribute("stroke", "black");
-                        bottom.setAttribute("stroke-width", 1);
-                        svg.appendChild(bottom);
+function renderBoard(board) {
+    const table = document.getElementById('board');
+    table.innerHTML = '';
 
-                        // vertical lines
-                        const leftLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                        leftLine.setAttribute("x1", cx - rx);
-                        leftLine.setAttribute("y1", topY);
-                        leftLine.setAttribute("x2", cx - rx);
-                        leftLine.setAttribute("y2", bottomY);
-                        leftLine.setAttribute("stroke", "black");
-                        leftLine.setAttribute("stroke-width", 2);
-                        svg.appendChild(leftLine);
+    board.forEach((row, r) => {
+        const tr = document.createElement('tr');
 
-                        const rightLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                        rightLine.setAttribute("x1", cx + rx);
-                        rightLine.setAttribute("y1", topY);
-                        rightLine.setAttribute("x2", cx + rx);
-                        rightLine.setAttribute("y2", bottomY);
-                        rightLine.setAttribute("stroke", "black");
-                        rightLine.setAttribute("stroke-width", 2);
-                        svg.appendChild(rightLine);
+        row.forEach((cell, c) => {
+            const td = document.createElement('td');
+            td.dataset.row = r;
+            td.dataset.col = c;
+            td.classList.add((r + c) % 2 === 0 ? 'light' : 'dark');
 
-                        // top ellipse
-                        const top = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
-                        top.setAttribute("cx", cx);
-                        top.setAttribute("cy", topY);
-                        top.setAttribute("rx", rx);
-                        top.setAttribute("ry", ry);
-                        top.setAttribute("fill", fillColor);
-                        top.setAttribute("stroke", "black");
-                        top.setAttribute("stroke-width", 2);
-                        svg.appendChild(top);
+            if (selected && selected[0] === r && selected[1] === c) {
+                td.classList.add('selected');
+            }
 
-                        // king cross
-                        if (cell.is_king) {
-                            const hLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                            hLine.setAttribute("x1", cx - 10);
-                            hLine.setAttribute("y1", topY);
-                            hLine.setAttribute("x2", cx + 10);
-                            hLine.setAttribute("y2", topY);
-                            hLine.setAttribute("stroke", "black");
-                            hLine.setAttribute("stroke-width", 3);
-                            svg.appendChild(hLine);
+            const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+            svg.setAttribute('class','square-svg');
+            svg.setAttribute('width','60');
+            svg.setAttribute('height','60');
+            svg.setAttribute('viewBox','0 0 60 60');
 
-                            const vLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                            vLine.setAttribute("x1", cx);
-                            vLine.setAttribute("y1", topY - 10);
-                            vLine.setAttribute("x2", cx);
-                            vLine.setAttribute("y2", topY + 10);
-                            vLine.setAttribute("stroke", "black");
-                            vLine.setAttribute("stroke-width", 3);
-                            svg.appendChild(vLine);
-                        }
-                    }
+            if (SPECIAL_SQUARES.some(pos => pos[0] === r && pos[1] === c)) {
+                const crossSize = 45;
+                const offset = (60 - crossSize) / 2;
 
-                    td.appendChild(svg);
-                    td.onclick = () => handleClick(r, c);
-                    tr.appendChild(td);
-                });
-                table.appendChild(tr);
-            });
-        }
+                const line1 = document.createElementNS('http://www.w3.org/2000/svg','line');
+                line1.setAttribute('x1', offset);
+                line1.setAttribute('y1', offset);
+                line1.setAttribute('x2', offset + crossSize);
+                line1.setAttribute('y2', offset + crossSize);
+                line1.setAttribute('stroke','black');
+                line1.setAttribute('stroke-width','3');
+                svg.appendChild(line1);
 
-        function handleClick(row, col) {
-            if (gameOver) return;
-            if (!selected) {
-                selected = [row, col];
-            } else {
+                const line2 = document.createElementNS('http://www.w3.org/2000/svg','line');
+                line2.setAttribute('x1', offset + crossSize);
+                line2.setAttribute('y1', offset);
+                line2.setAttribute('x2', offset);
+                line2.setAttribute('y2', offset + crossSize);
+                line2.setAttribute('stroke','black');
+                line2.setAttribute('stroke-width','3');
+                svg.appendChild(line2);
+            }
+
+            if (cell) {
+                const cx = 30;
+                const rx = 20;
+                const ry = 10;
+                const topY = 25;
+                const bottomY = 30;
+
+                const fillColor = cell.is_king ? "#009999" :
+                                  (cell.team === "attacker" ? "#ff6666" : "#66cccc");
+
+                const sideColor = cell.is_king ? "#007777" :
+                                  (cell.team === "attacker" ? "#cc0000" : "#339999");
+
+                const bottom = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
+                bottom.setAttribute("cx", cx);
+                bottom.setAttribute("cy", bottomY);
+                bottom.setAttribute("rx", rx);
+                bottom.setAttribute("ry", ry);
+                bottom.setAttribute("fill", sideColor);
+                bottom.setAttribute("stroke", "black");
+                bottom.setAttribute("stroke-width", 2);
+                svg.appendChild(bottom);
+
+                const leftLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                leftLine.setAttribute("x1", cx - rx);
+                leftLine.setAttribute("y1", topY);
+                leftLine.setAttribute("x2", cx - rx);
+                leftLine.setAttribute("y2", bottomY);
+                leftLine.setAttribute("stroke", "black");
+                leftLine.setAttribute("stroke-width", 2);
+                svg.appendChild(leftLine);
+
+                const rightLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                rightLine.setAttribute("x1", cx + rx);
+                rightLine.setAttribute("y1", topY);
+                rightLine.setAttribute("x2", cx + rx);
+                rightLine.setAttribute("y2", bottomY);
+                rightLine.setAttribute("stroke", "black");
+                rightLine.setAttribute("stroke-width", 2);
+                svg.appendChild(rightLine);
+
+                const top = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
+                top.setAttribute("cx", cx);
+                top.setAttribute("cy", topY);
+                top.setAttribute("rx", rx);
+                top.setAttribute("ry", ry);
+                top.setAttribute("fill", fillColor);
+                top.setAttribute("stroke", "black");
+                top.setAttribute("stroke-width", 2);
+                svg.appendChild(top);
+
+                if (cell.is_king) {
+                    const crossHalf = 10;
+
+                    const h = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    h.setAttribute("x1", cx - crossHalf);
+                    h.setAttribute("y1", topY);
+                    h.setAttribute("x2", cx + crossHalf);
+                    h.setAttribute("y2", topY);
+                    h.setAttribute("stroke","black");
+                    h.setAttribute("stroke-width","3");
+                    svg.appendChild(h);
+
+                    const v = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    v.setAttribute("x1", cx);
+                    v.setAttribute("y1", topY - crossHalf);
+                    v.setAttribute("x2", cx);
+                    v.setAttribute("y2", topY + crossHalf);
+                    v.setAttribute("stroke","black");
+                    v.setAttribute("stroke-width","3");
+                    svg.appendChild(v);
+                }
+            }
+
+            td.appendChild(svg);
+
+            td.addEventListener('click', () => {
+                if (gameOver) return;
+
+                if (!selected) {
+                    selected = [r, c];
+                    renderBoard(board);
+                    return;
+                }
+
+                if (selected[0] === r && selected[1] === c) {
+                    selected = null;
+                    renderBoard(board);
+                    return;
+                }
+
                 const start = selected;
-                const end = [row, col];
+                const end = [r, c];
                 selected = null;
+                renderBoard(board);
 
                 fetch('/make_move', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ start: start, end: end })
-                })
-                .then(async response => {
-                    const data = await response.json();
-                    if (!response.ok) {
-                        alert("Move rejected: " + (data.error || "Illegal move"));
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({ start, end })
+                }).then(async res => {
+                    const data = await res.json().catch(()=>null);
+
+                    if (!res.ok) {
+                        if (data && data.board) {
+                            currentBoard = data.board;
+                            renderBoard(currentBoard);
+                        }
+                        alert('Move rejected: ' + (data && data.error ? data.error : 'Illegal move'));
                         return;
                     }
-                    renderBoard(data.board);
 
-                    if (data.game_over) {
-                        gameOver = true;
-                        document.getElementById('status').innerText = "Game over! Winner: " + data.winner;
-                    }
-                })
-                .catch(err => {
+                    currentBoard = data.board;
+                    currentTurn = data.current_turn;
+                    gameOver = data.game_over;
+
+                    document.getElementById('status').innerText =
+                        data.game_over ?
+                            ('Game over — ' + (data.winner || 'winner')) :
+                            ('Turn: ' + currentTurn);
+
+                    renderBoard(currentBoard);
+                    updateBackground();   // NEW
+                }).catch(err => {
                     console.error(err);
-                    alert("Connection error.");
+                    alert('Network error while making move.');
+                    if (currentBoard) renderBoard(currentBoard);
                 });
-            }
-        }
-    </script>
+            });
+
+            tr.appendChild(td);
+        });
+
+        table.appendChild(tr);
+    });
+}
+
+renderBoard(Array.from({length:7}, ()=>Array.from({length:7}, ()=>null)));
+updateBackground();
+</script>
 </body>
 </html>
