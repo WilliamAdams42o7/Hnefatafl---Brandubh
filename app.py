@@ -126,6 +126,16 @@ def king_captured(r, c, state):
                 return True
     return False
 
+def hostile_square(r, c, attacking_team, state):
+    if not (0 <= r < ROWS and 0 <= c < COLUMNS):
+        return False
+    piece = state["board"][r][c]
+    if (r, c) == THRONE:
+        return piece is None
+    if (r, c) in CORNERS:
+        return piece is None
+    return piece is not None and piece.team == attacking_team
+
 def check_victory_conditions(state):
     if state["game_over"]:
         return
@@ -139,6 +149,22 @@ def check_victory_conditions(state):
     if not king_exists:
         state["winner"] = 'attacker'
         state["game_over"] = True
+
+def game_over_check(board):
+    """
+    Returns True if either the king is captured or has reached an escape square.
+    Replace this with your actual victory condition if you have one.
+    """
+    king_alive = False
+    for r in range(ROWS):
+        for c in range(COLUMNS):
+            piece = board[r][c]
+            if piece and piece.is_king:
+                king_alive = True
+                # Optional: king escape condition (Brandubh style)
+                if (r, c) in [(0, 0), (0, ROWS - 1), (ROWS - 1, 0), (ROWS - 1, COLUMNS - 1)]:
+                    return True  # King has escaped
+    return not king_alive  # King dead = game over
 
 # ===================== AI =====================
 def opponent_move(state):
@@ -176,13 +202,45 @@ def start_game():
 
 @app.route("/make_move", methods=["POST"])
 def make_move():
-    data = request.json
-    start = tuple(data["start"])
-    end = tuple(data["end"])
-    move_piece(start, end, game_state)
+    if game_state["game_over"]:
+        return jsonify({"error": "game over"}), 400
 
-    # AI move if needed
-    if ai_turn(game_state):
+    data = request.json
+    try:
+        start = tuple(map(int, data["start"]))
+        end = tuple(map(int, data["end"]))
+    except Exception:
+        return jsonify({"error": "bad coordinates"}), 400
+
+    sr, sc = start
+    er, ec = end
+
+    # Basic bounds check
+    if not (0 <= sr < ROWS and 0 <= sc < COLUMNS and 0 <= er < ROWS and 0 <= ec < COLUMNS):
+        return jsonify({"error": "out of bounds"}), 400
+
+    piece = game_state["board"][sr][sc]
+    if piece is None:
+        return jsonify({"error": "no piece at start"}), 400
+
+    # Ensure player may only move their own piece
+    if piece.team != game_state["current_turn"]:
+        return jsonify({"error": "not your piece"}), 400
+
+    # Get valid moves and check the destination
+    valid = get_valid_moves(game_state["board"], sr, sc)
+    if (er, ec) not in valid:
+        return jsonify({"error": "illegal move", "valid_moves": valid}), 400
+
+    # Apply the move
+    move_piece((sr, sc), (er, ec), game_state)
+
+    # Switch turn (only if game not ended by the move)
+    if not game_state["game_over"]:
+        game_state["current_turn"] = 'defender' if game_state["current_turn"] == 'attacker' else 'attacker'
+
+    # Optional: if mode requires immediate AI response, handle it
+    if ai_turn(game_state) and not game_state["game_over"]:
         opponent_move(game_state)
 
     return jsonify({
@@ -190,7 +248,8 @@ def make_move():
         "current_turn": game_state["current_turn"],
         "game_over": game_state["game_over"],
         "winner": game_state["winner"]
-    })
+            })
+
 
 def ai_turn(state):
     mode = state["game_mode"]
