@@ -6,7 +6,6 @@
     <style>
         html,body { height:100%; margin:0; font-family: sans-serif; }
 
-        /* --- NEW PAGE BACKGROUND STATES --- */
         body.attacker-turn { background-color: #ffcccc; transition: background-color 0.3s ease; }
         body.defender-turn { background-color: #cce0ff; transition: background-color 0.3s ease; }
         body.attacker-win  { background-color: #ad2f2f !important; }
@@ -22,17 +21,18 @@
             position: relative;
             box-sizing: border-box;
         }
-        td.light { background-color: #deb887; } /* L_BROWN */
-        td.dark  { background-color: #85542a; } /* D_BROWN */
+        td.light { background-color: #deb887; }
+        td.dark  { background-color: #85542a; }
         td.selected { outline: 3px solid yellow; outline-offset: -3px; }
         #status { text-align: center; font-size: 16px; margin-top: 8px; min-height:22px; }
         #mode-buttons { margin: 10px 0; }
         button { padding: 8px 12px; margin: 4px; }
-            #board {
-        border: 4px solid black;
-        display: inline-block;
-        }
+        #board { border: 4px solid black; display: inline-block; }
         svg.square-svg { display:block; margin:auto; }
+
+        /* rules section */
+        #rules-container { max-width:520px; margin: 20px auto; text-align:left; border:1px solid #333; padding:10px; }
+        #rules-container h2 { text-align:center; margin-top:0; }
     </style>
 </head>
 
@@ -40,10 +40,19 @@
     <div class="container">
         <div id="mode-buttons">
             <button onclick="startGame('PvP')">Player vs Player</button>
+            <button onclick="startGame('AI_Attacker_vs_Player')">Opponent (Attacker) vs Player (Defender)</button>
+            <button onclick="startGame('Player_vs_AI_Defender')">Player (Attacker) vs Opponent (Defender)</button>
+            <button onclick="startGame('AI_vs_AI')">Opponent vs Opponent</button>
         </div>
 
         <div id="status">Press "Player vs Player" to start</div>
         <table id="board" aria-label="Hnefatafl board"></table>
+    </div>
+
+    <!-- Rules Section -->
+    <div id="rules-container">
+        <h2>Game Rules</h2>
+        <p>...</p>
     </div>
 
 <script>
@@ -52,7 +61,10 @@ let selected = null;
 let gameOver = false;
 let currentBoard = null;
 let currentTurn = null;
+let tickInterval = null;
+const TICK_MS = 1200;
 
+/* ------------------ UI helpers ------------------ */
 function updateBackground() {
     const body = document.getElementById("page");
 
@@ -72,8 +84,52 @@ function updateBackground() {
     if (currentTurn === "attacker") body.classList.add("attacker-turn");
     else if (currentTurn === "defender") body.classList.add("defender-turn");
 }
-/* -------------------------------------------------- */
 
+/* ------------------ TICK /tick ------------------ */
+function startTicking() {
+    if (tickInterval) return;
+
+    tickInterval = setInterval(() => {
+        fetch("/tick", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (!data) return;
+
+            if (data.board) {
+                currentBoard = data.board;
+                currentTurn = data.current_turn;
+                gameOver = !!data.game_over;
+
+                renderBoard(currentBoard);
+                updateBackground();
+
+                if (gameOver) {
+                    document.getElementById('status').innerText =
+                        "Winner: " +
+                        (data.winner === "attacker" ? "Attacker" :
+                         data.winner === "defender" ? "Defender" : "Winner");
+
+                    stopTicking();
+                } else {
+                    document.getElementById('status').innerText =
+                        "Turn: " + (currentTurn === "attacker" ? "Attacker" : "Defender");
+                }
+            }
+        })
+        .catch(err => console.error("Tick error:", err));
+    }, TICK_MS);
+}
+
+function stopTicking() {
+    if (!tickInterval) return;
+    clearInterval(tickInterval);
+    tickInterval = null;
+}
+
+/* ------------------ Start Game ------------------ */
 function startGame(mode) {
     fetch('/start_game', {
         method:'POST',
@@ -82,7 +138,7 @@ function startGame(mode) {
     }).then(res => res.json())
       .then(data => {
           currentBoard = data.board;
-          gameOver = false;
+          gameOver = !!data.game_over;
           selected = null;
           currentTurn = data.current_turn;
 
@@ -90,14 +146,17 @@ function startGame(mode) {
               "Game started: " + (mode || 'PvP');
 
           renderBoard(currentBoard);
-          updateBackground();   // NEW
+          updateBackground();
+
+          startTicking();
       })
       .catch(err => {
           console.error(err);
-          alert('Could not start game (check server).');
+          alert('Could not start game.');
       });
 }
 
+/* ------------------ Render Board ------------------ */
 function renderBoard(board) {
     const table = document.getElementById('board');
     table.innerHTML = '';
@@ -252,7 +311,8 @@ function renderBoard(board) {
                             currentBoard = data.board;
                             renderBoard(currentBoard);
                         }
-                        alert('Move rejected: ' + (data && data.error ? data.error : 'Illegal move'));
+                        alert('Move rejected: ' +
+                              (data && data.error ? data.error : 'Illegal move'));
                         return;
                     }
 
@@ -262,14 +322,21 @@ function renderBoard(board) {
 
                     document.getElementById('status').innerText =
                         data.game_over ?
-                            ('Game over — ' + (data.winner || 'winner')) :
-                            ('Turn: ' + currentTurn);
+                            ("Winner: " +
+                             (data.winner === "attacker" ? "Attacker" :
+                              data.winner === "defender" ? "Defender" :
+                              "Winner")) :
+                            ("Turn: " +
+                             (currentTurn === "attacker" ? "Attacker" :
+                              "Defender"));
 
                     renderBoard(currentBoard);
-                    updateBackground();   // NEW
+                    updateBackground();
+
+                    if (!gameOver) startTicking();
                 }).catch(err => {
                     console.error(err);
-                    alert('Network error while making move.');
+                    alert('Network error.');
                     if (currentBoard) renderBoard(currentBoard);
                 });
             });
@@ -281,8 +348,10 @@ function renderBoard(board) {
     });
 }
 
+/* initial empty board render */
 renderBoard(Array.from({length:7}, ()=>Array.from({length:7}, ()=>null)));
 updateBackground();
 </script>
 </body>
 </html>
+
