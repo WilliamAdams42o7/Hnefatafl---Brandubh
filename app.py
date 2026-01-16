@@ -10,8 +10,11 @@ THRONE = (3, 3)
 CORNERS = [(0, 0), (0, 6), (6, 0), (6, 6)]
 SPECIAL_SQUARES = CORNERS + [THRONE]
 
-# Search depth for minimax (change to 3 when you want stronger AI; slower)
-SEARCH_DEPTH = 2
+# Search depth for minimax 
+SEARCH_DEPTH = 3
+
+eval_cache = {}       # Cache for evaluate_state results
+minimax_cache = {}    # Cache for minimax results
 
 # ===================== Pieces & Board =====================
 class Piece:
@@ -40,7 +43,8 @@ game_state = {
     "valid_moves": [],
     "game_over": False,
     "winner": None,
-    "last_moves": []  # for repetition rule if you use it
+    "last_moves": [],
+    "ai_thinking": False  
 }
 
 # ===================== Game logic =====================
@@ -152,7 +156,6 @@ def check_victory_conditions(state):
     if not king_exists:
         state["winner"] = 'attacker'
         state["game_over"] = True
-
 def is_ai_controlled(state, team):
     mode = state.get("game_mode")
     if mode == "PvP" or mode is None:
@@ -168,7 +171,6 @@ def is_ai_controlled(state, team):
     if mode == "AIvP":
         return state["current_turn"] == 'defender'
     return False
-
 def board_to_dict(state):
     result = []
     for row in state["board"]:
@@ -180,7 +182,103 @@ def board_to_dict(state):
                 r.append({"team": piece.team, "is_king": piece.is_king})
         result.append(r)
     return result
+def board_hash(board):
+    return tuple(
+        tuple(
+            None if p is None else (p.team, p.is_king)
+            for p in row
+        )
+        for row in board
+    )
+def king_has_clear_escape(board):
+    for r in range(ROWS):
+        for c in range(COLUMNS):
+            p = board[r][c]
+            if p and p.is_king:
+                kr, kc = r, c
+                break
+        else:
+            continue
+        break
+    else:
+        return False
+    directions = [(-1,0),(1,0),(0,-1),(0,1)]
+    for dr, dc in directions:
+        r, c = kr + dr, kc + dc
+        clear = True
+        while 0 <= r < ROWS and 0 <= c < COLUMNS:
+            if board[r][c] is not None:
+                clear = False
+                break
+            r += dr
+            c += dc
+        if clear:
+            return True
+    return False
 
+def king_can_reach_edge_next(board):
+    for r in range(ROWS):
+        for c in range(COLUMNS):
+            p = board[r][c]
+            if p and p.is_king:
+                kr, kc = r, c
+                break
+        else:
+            continue
+        break
+    else:
+        return False
+
+    moves = get_valid_moves(board, kr, kc)
+    for mr, mc in moves:
+        if mr == 0 or mr == ROWS-1 or mc == 0 or mc == COLUMNS-1:
+            return True
+    return False
+
+def is_potential_capture(state, move):
+    (_, _), (er, ec) = move
+    board = state["board"]
+    directions = [(-1,0),(1,0),(0,-1),(0,1)]
+    for dr, dc in directions:
+        r, c = er + dr, ec + dc
+        if 0 <= r < ROWS and 0 <= c < COLUMNS:
+            p = board[r][c]
+            if p and p.team != state["current_turn"]:
+                return True
+    return False
+
+def get_forced_win_moves(state, team):
+    forced = []
+    for start, end in get_all_moves_for_state(state, team):
+        temp = copy.deepcopy(state)
+        move_piece(start, end, temp)
+        if team == 'defender' and king_has_clear_escape(temp["board"]):
+            forced.append((start, end))
+        elif team == 'attacker' and not any(p.is_king for row in temp["board"] for p in row if p):
+            forced.append((start, end))
+    return forced
+
+def evaluate_state_cached(state, ai_team):
+    h = board_hash(state["board"])
+    key = (h, ai_team, state["current_turn"])
+    if key in eval_cache:
+        return eval_cache[key]
+    val = evaluate_state(state, ai_team)
+    eval_cache[key] = val
+    return val
+
+def blocks_escape(prev_board, new_board):
+    return king_has_clear_escape(prev_board) and not king_has_clear_escape(new_board)
+
+def simulate_move(state, move):
+    temp = copy.deepcopy(state)
+    start, end = move
+    move_piece(start, end, temp)
+    if not temp["game_over"]:
+        temp["current_turn"] = (
+            'defender' if state["current_turn"] == 'attacker' else 'attacker'
+        )
+    return temp
 # ===================== Flask Routes =====================
 @app.route("/")
 def index():
@@ -234,12 +332,8 @@ def make_move():
     if not game_state["game_over"]:
         game_state["current_turn"] = 'defender' if game_state["current_turn"] == 'attacker' else 'attacker'
     mode = game_state.get("game_mode")
-    ai_moves_done = 0
-    while not game_state["game_over"] and is_ai_controlled(game_state, game_state["current_turn"]):
+    if not game_state["game_over"] and is_ai_controlled(game_state, game_state["current_turn"]):
         opponent_move(game_state)
-        ai_moves_done += 1
-        if mode in ("AI_vs_AI", "AIvAI"):
-            break
     return jsonify({
         "board": board_to_dict(game_state),
         "current_turn": game_state["current_turn"],
@@ -250,22 +344,20 @@ def make_move():
 
 @app.route("/tick", methods=["POST"])
 def tick():
-    if game_state["game_over"]:
-        return jsonify({
-            "board": board_to_dict(game_state),
-            "current_turn": game_state["current_turn"],
-            "game_over": True,
-            "winner": game_state["winner"]
-        })
-    if is_ai_controlled(game_state, game_state["current_turn"]):
+    if (
+        game_state["game_mode"] in ("AI_vs_AI", "AIvAI")
+        and not game_state["game_over"]
+        and not game_state.get("ai_thinking")
+        and is_ai_controlled(game_state, game_state["current_turn"])
+    ):
         opponent_move(game_state)
-        return jsonify({
-            "board": board_to_dict(game_state),
-            "current_turn": game_state["current_turn"],
-            "game_over": game_state["game_over"],
-            "winner": game_state["winner"]
-        })
-    return jsonify({"status": "no_ai_turn"})
+
+    return jsonify({
+        "board": board_to_dict(game_state),
+        "current_turn": game_state["current_turn"],
+        "game_over": game_state["game_over"],
+        "winner": game_state["winner"]
+    })
 
 # ===================== AI: minimax with alpha-beta =====================
 def evaluate_state(state, ai_team):
@@ -303,6 +395,29 @@ def evaluate_state(state, ai_team):
                 king_score -= max(0, 6 - nearest_attacker) * 2
             else:
                 king_score += max(0, 6 - nearest_attacker) * 2
+        danger = 0
+        for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+            nr, nc = kr + dr, kc + dc
+            orr, occ = kr - dr, kc - dc
+            if 0 <= nr < ROWS and 0 <= nc < COLUMNS:
+                p = board[nr][nc]
+                if p and p.team == 'attacker':
+                    danger += 3
+            if (
+                0 <= nr < ROWS and 0 <= nc < COLUMNS and
+                0 <= orr < ROWS and 0 <= occ < COLUMNS
+            ):
+                p1 = board[nr][nc]
+                p2 = board[orr][occ]
+                if (
+                    p1 and p1.team == 'attacker' and
+                    (p2 and p2.team == 'attacker' or (orr, occ) in SPECIAL_SQUARES)
+                ):
+                    danger += 6
+        if ai_team == 'defender':
+            king_score -= danger * 4
+        else:
+            king_score += danger * 4
     ai_moves = 0
     opp_moves = 0
     for r in range(ROWS):
@@ -315,6 +430,20 @@ def evaluate_state(state, ai_team):
             else:
                 opp_moves += len(moves)
     mobility = ai_moves - opp_moves
+    if ai_team == 'defender' and king_has_clear_escape(board):
+        return 10_000
+    if ai_team == 'attacker' and king_has_clear_escape(board):
+        return -10_000
+    if king_has_clear_escape(board):
+        if ai_team == 'defender':
+            king_score += 2500
+        else:
+            king_score -= 2500
+    if king_can_reach_edge_next(board):
+        if ai_team == 'defender':
+            king_score += 1500
+        else:
+            king_score -= 1500
     return material + king_score + mobility * 1.5
 
 def get_all_moves_for_state(state, team):
@@ -329,86 +458,99 @@ def get_all_moves_for_state(state, team):
     return moves
 
 def minimax(state, depth, alpha, beta, ai_team):
-    if depth == 0 or state["game_over"]:
-        return evaluate_state(state, ai_team), None
+    if state["game_over"]:
+        if state["winner"] == ai_team:
+            return 10_000 - (SEARCH_DEPTH - depth), None
+        else:
+            return -10_000 + (SEARCH_DEPTH - depth), None
+    maximizing = (state["current_turn"] == ai_team)
+    key = (board_hash(state["board"]), depth, state["current_turn"], maximizing)
+    if key in minimax_cache:
+        return minimax_cache[key]
     current = state["current_turn"]
+    if depth == 0 or state["game_over"]:
+        score = evaluate_state_cached(state, ai_team)
+        minimax_cache[key] = (score, None)
+        return score, None
     moves = get_all_moves_for_state(state, current)
     if not moves:
-        return (-10000, None) if current == ai_team else (10000, None)
-    maximizing = (current == ai_team)
-    best_move = None
-    if maximizing:
-        value = -float('inf')
-        for start, end in moves:
-            temp_state = copy.deepcopy(state)
-            move_piece(start, end, temp_state)
-            if not temp_state["game_over"]:
-                temp_state["current_turn"] = 'defender' if temp_state["current_turn"] == 'attacker' else 'attacker'
-            score, _ = minimax(temp_state, depth - 1, alpha, beta, ai_team)
-            if score > value:
-                value = score
-                best_move = (start, end)
-            alpha = max(alpha, value)
+        score = -10_000 if current == ai_team else 10_000
+        minimax_cache[key] = (score, None)
+        return score, None
+    random.shuffle(moves)
+    moves.sort(
+    key=lambda m: (blocks_escape(state["board"], simulate_move(state, m)["board"]), is_potential_capture(state, m)),reverse=True)
+    best_value = -float('inf') if maximizing else float('inf')
+    best_moves = []
+    for start, end in moves:
+        temp = copy.deepcopy(state)
+        move_piece(start, end, temp)
+        if not temp["game_over"]:
+            temp["current_turn"] = (
+                'defender' if current == 'attacker' else 'attacker'
+            )
+        score, _ = minimax(temp, depth - 1, alpha, beta, ai_team)
+        if maximizing:
+            if score > best_value:
+                best_value = score
+                best_moves = [(start, end)]
+            elif score == best_value:
+                best_moves.append((start, end))
+            alpha = max(alpha, best_value)
             if alpha >= beta:
                 break
-        return value, best_move
-    else:
-        value = float('inf')
-        for start, end in moves:
-            temp_state = copy.deepcopy(state)
-            move_piece(start, end, temp_state)
-            if not temp_state["game_over"]:
-                temp_state["current_turn"] = 'defender' if temp_state["current_turn"] == 'attacker' else 'attacker'
-            score, _ = minimax(temp_state, depth - 1, alpha, beta, ai_team)
-            if score < value:
-                value = score
-                best_move = (start, end)
-            beta = min(beta, value)
+        else:
+            if score < best_value:
+                best_value = score
+                best_moves = [(start, end)]
+            elif score == best_value:
+                best_moves.append((start, end))
+            beta = min(beta, best_value)
             if alpha >= beta:
                 break
-        return value, best_move
+    result = (best_value, random.choice(best_moves) if best_moves else None)
+    minimax_cache[key] = result
+    return result
 
 def opponent_move(state):
-    team = state["current_turn"]
-    moves = get_all_moves_for_state(state, team)
-    if not moves:
-        state["game_over"] = True
-        state["winner"] = 'defender' if team == 'attacker' else 'attacker'
+    eval_cache.clear()
+    minimax_cache.clear()
+    if state.get("game_over"):
         return False
-    ai_team = team
-    score, best = minimax(copy.deepcopy(state), SEARCH_DEPTH, -float('inf'), float('inf'), ai_team)
-    if not best:
-        best_score = -999999
-        best_choices = []
-        for start, ends in moves:
-            for end in [ends] if not isinstance(ends, tuple) else [ends]:
-                temp_state = copy.deepcopy(state)
-                before = sum(1 for row in temp_state["board"] for p in row if p is not None)
-                move_piece(start, end, temp_state)
-                after = sum(1 for row in temp_state["board"] for p in row if p is not None)
-                captured = before - after
-                s = captured * 10
-                if temp_state["game_over"]:
-                    if temp_state["winner"] == team:
-                        s += 1000
-                    else:
-                        s -= 1000
-                if s > best_score:
-                    best_score = s
-                    best_choices = [(start, end)]
-                elif s == best_score:
-                    best_choices.append((start, end))
-        if best_choices:
-            best = random.choice(best_choices)
-        else:
-            start, ends = random.choice(moves)
-            best = (start, random.choice([ends] if not isinstance(ends, tuple) else [ends]))
-    if best:
+    if state.get("ai_thinking"):
+        return False
+    team = state["current_turn"]
+    if not is_ai_controlled(state, team):
+        return False
+    state["ai_thinking"] = True
+    try:
+        moves = get_all_moves_for_state(state, team)
+        if not moves:
+            state["game_over"] = True
+            state["winner"] = 'defender' if team == 'attacker' else 'attacker'
+            return False
+        score, best = minimax(
+            copy.deepcopy(state),
+            SEARCH_DEPTH,
+            -float('inf'),
+            float('inf'),
+            team
+        )
+        if not best:
+            best = random.choice(moves)
         move_piece(best[0], best[1], state)
+        state_hash = board_hash(state["board"])
+        state.setdefault("position_history", []).append(state_hash)
+        if len(state["position_history"]) > 20:
+            state["position_history"].pop(0)
+
         if not state["game_over"]:
-            state["current_turn"] = 'defender' if state["current_turn"] == 'attacker' else 'attacker'
+            state["current_turn"] = (
+                'defender' if team == 'attacker' else 'attacker'
+            )
         return True
-    return False
+    finally:
+        state["ai_thinking"] = False
 
 # =====================
 if __name__ == "__main__":
