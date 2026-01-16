@@ -52,8 +52,54 @@
     <!-- Rules Section -->
     <div id="rules-container">
         <h2>Game Rules</h2>
-        <p>...</p>
-    </div>
+        <h3>Sides and Setup</h3>
+        <p>     There are two sides: Attackers (Red) and Defenders (Blue).</p>
+        <p>     The Attackers have eight pieces.</p>
+        <p>     The Defenders have five pieces: the King and four defenders.</p>
+        <p>     Attackers (Red) move first.</p>
+
+        <h3>Movement</h3>
+        <p>     All pieces move orthogonally (up, down, left, right), like a rook in chess.</p>
+        <p>     Pieces may move any number of squares in a straight line.</p>
+        <p>     Pieces may not jump over or land on another piece.</p>
+
+        <h3>Special Squares</h3>
+        <p>     The Throne is the marked square in the centre of the board.</p>
+        <p>     The King starts on the Throne.</p>
+        <p>     No piece may land on the Throne after the King leaves, including the King.</p>
+        <p>     The Corner Squares are marked.</p>
+        <p>     Only the King may land on corner squares.</p>
+        <p>     Corner squares are hostile to all pieces, including the King.</p>
+
+        <h3>Capturing</h3>
+        <p>     A piece is captured when it is sandwiched orthogonally on two directly opposite sides by enemy pieces.</p>
+        <p>     Captures occur only when a piece moves into position to complete the sandwich.</p>
+        <p>     A piece may move between two hostile pieces without being captured.</p>
+        <p>     The King is armed and may participate in captures like any other piece.</p>
+
+        <h3>Special Squares</h3>
+        <p>     The Throne is always hostile to Attackers.</p>
+        <p>     An Attacker may be captured between the Throne and a Defender.</p>
+        <p>     If the Throne is empty, it is also hostile to Defenders.</p>
+        <p>     If the King is on the Throne, the Throne is not hostile to the King.</p>
+        <p>     Corner squares are hostile to all pieces, including the King.</p>
+        <p>     A piece may be captured by being sandwiched between a corner square and an enemy piece.</p>
+
+        <h3>Capturing the King</h3>
+        <p>     When the King is on the Throne, he must be surrounded on all four sides by Attackers to be captured.</p>
+        <p>     When the King is adjacent to the Throne, he must be surrounded on the remaining three sides by Attackers.</p>
+        <p>     Elsewhere on the board, the King is captured normally, by two opposing pieces.</p>
+
+        <h3>Victory Conditions</h3>
+        <p><strong>Attackers (Red) win if:</strong></p>
+        <p>     They capture the King, or</p>
+        <p>     All Defending pieces are surrounded.</p>
+
+        <p><strong>Defenders (Blue) win if:</strong></p>
+        <p>     The King escapes by reaching any corner square.</p>
+
+        <p><strong>If a player cannot make any valid move, they lose the game.<strong></p>
+        </div>
 
 <script>
 const SPECIAL_SQUARES = [[3,3],[0,0],[0,6],[6,0],[6,6]];
@@ -62,7 +108,7 @@ let gameOver = false;
 let currentBoard = null;
 let currentTurn = null;
 let tickInterval = null;
-const TICK_MS = 1200;
+const TICK_MS = 400;
 
 /* ------------------ UI helpers ------------------ */
 function updateBackground() {
@@ -97,15 +143,12 @@ function startTicking() {
         .then(res => res.json())
         .then(data => {
             if (!data) return;
-
             if (data.board) {
                 currentBoard = data.board;
                 currentTurn = data.current_turn;
                 gameOver = !!data.game_over;
-
                 renderBoard(currentBoard);
                 updateBackground();
-
                 if (gameOver) {
                     document.getElementById('status').innerText =
                         "Winner: " +
@@ -348,7 +391,6 @@ function renderBoard(board) {
     });
 }
 
-/* initial empty board render */
 renderBoard(Array.from({length:7}, ()=>Array.from({length:7}, ()=>null)));
 updateBackground();
 </script>
