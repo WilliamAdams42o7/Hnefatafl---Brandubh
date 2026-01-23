@@ -444,6 +444,14 @@ def evaluate_state(state, ai_team):
             king_score += 1500
         else:
             king_score -= 1500
+    if ai_team == 'attacker':
+        if king_has_clear_escape(board):
+            return -12_000
+    if ai_team == 'attacker':
+        if not king_has_clear_escape(board):
+            king_score += 80
+    if ai_team == 'defender' and king_has_clear_escape(board):
+        return 12_000
     return material + king_score + mobility * 1.5
 
 def get_all_moves_for_state(state, team):
@@ -460,26 +468,27 @@ def get_all_moves_for_state(state, team):
 def minimax(state, depth, alpha, beta, ai_team):
     if state["game_over"]:
         if state["winner"] == ai_team:
-            return 10_000 - (SEARCH_DEPTH - depth), None
+            return 100_000 - (SEARCH_DEPTH - depth), None
         else:
-            return -10_000 + (SEARCH_DEPTH - depth), None
+            return -100_000 + (SEARCH_DEPTH - depth), None
+    current = state["current_turn"]
+    moves = get_all_moves_for_state(state, current)
+    for start, end in moves:
+        temp = copy.deepcopy(state)
+        move_piece(start, end, temp)
+        if temp["game_over"] and temp["winner"] == ai_team:
+            return 100_000, (start, end)
     maximizing = (state["current_turn"] == ai_team)
-    key = (board_hash(state["board"]), depth, state["current_turn"], maximizing)
-    if key in minimax_cache:
-        return minimax_cache[key]
     current = state["current_turn"]
     if depth == 0 or state["game_over"]:
         score = evaluate_state_cached(state, ai_team)
-        minimax_cache[key] = (score, None)
         return score, None
     moves = get_all_moves_for_state(state, current)
     if not moves:
         score = -10_000 if current == ai_team else 10_000
-        minimax_cache[key] = (score, None)
         return score, None
-    random.shuffle(moves)
-    moves.sort(
-    key=lambda m: (blocks_escape(state["board"], simulate_move(state, m)["board"]), is_potential_capture(state, m)),reverse=True)
+    #random.shuffle(moves)
+    moves.sort(key=lambda m: (blocks_escape(state["board"], simulate_move(state, m)["board"]),is_potential_capture(state, m)),reverse=True)
     best_value = -float('inf') if maximizing else float('inf')
     best_moves = []
     for start, end in moves:
@@ -509,7 +518,6 @@ def minimax(state, depth, alpha, beta, ai_team):
             if alpha >= beta:
                 break
     result = (best_value, random.choice(best_moves) if best_moves else None)
-    minimax_cache[key] = result
     return result
 
 def opponent_move(state):
