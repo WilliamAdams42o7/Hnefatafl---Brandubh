@@ -11,7 +11,7 @@ CORNERS = [(0, 0), (0, 6), (6, 0), (6, 6)]
 SPECIAL_SQUARES = CORNERS + [THRONE]
 
 # Search depth for minimax 
-SEARCH_DEPTH = 3
+SEARCH_DEPTH = 2
 
 eval_cache = {}       # Cache for evaluate_state results
 minimax_cache = {}    # Cache for minimax results
@@ -487,8 +487,9 @@ def minimax(state, depth, alpha, beta, ai_team):
     if not moves:
         score = -10_000 if current == ai_team else 10_000
         return score, None
-    #random.shuffle(moves)
-    moves.sort(key=lambda m: (blocks_escape(state["board"], simulate_move(state, m)["board"]),is_potential_capture(state, m)),reverse=True)
+    random.shuffle(moves)
+    #moves.sort(key=lambda m: (blocks_escape(state["board"], simulate_move(state, m)["board"]),is_potential_capture(state, m)),reverse=True)
+    moves.sort(key=lambda m: is_potential_capture(state, m),reverse=True)
     best_value = -float('inf') if maximizing else float('inf')
     best_moves = []
     for start, end in moves:
