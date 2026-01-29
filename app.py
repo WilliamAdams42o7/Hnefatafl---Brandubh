@@ -522,7 +522,9 @@ def minimax(state, depth, alpha, beta, ai_team):
     return result
 
 def opponent_move(state):
-    eval_cache.clear()
+    if len(eval_cache) > 2000:
+        eval_cache.clear()
+    #eval_cache.clear()
     minimax_cache.clear()
     if state.get("game_over"):
         return False
@@ -564,3 +566,4 @@ def opponent_move(state):
 # =====================
 if __name__ == "__main__":
     app.run(debug=True)
+
